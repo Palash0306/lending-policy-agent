@@ -1,0 +1,19 @@
+# --- Phase 1: Ollama setup + local inference ---
+ollama>=0.4.0
+python-dotenv>=1.0.0
+pytest>=8.0.0
+
+# --- Phase 2: document ingestion (PDF/Word parsing, chunking) ---
+pdfplumber>=0.11.0
+python-docx>=1.1.0
+fpdf2>=2.7.0        # test-only: generates sample PDFs for tests/conftest.py; not used by real ingestion
+
+# --- Phase 3: embeddings + Chroma vector store ---
+chromadb>=0.5.0
+sentence-transformers>=3.0.0    # first real run downloads model weights once (~80MB default model), then fully offline
+
+# --- Later phases will add (kept out for now to keep the install lean) ---
+# langgraph           # Phase 7: orchestration
+# fastapi             # Phase 8: chat endpoint
+# uvicorn[standard]   # Phase 8: ASGI server
+# streamlit           # optional frontend
