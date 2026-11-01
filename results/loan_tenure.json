@@ -1,0 +1,101 @@
+{
+  "field": "loan_tenure",
+  "route": "verified",
+  "summary": "#1 maximum 72 months [example] grounded - pub-ch-retail-lending.pdf, p.23\n#2 maximum 60 months [example] grounded - pub-ch-retail-lending.pdf, p.23",
+  "attempts": 1,
+  "widened_search": false,
+  "result": {
+    "field": "loan_tenure",
+    "status": "found",
+    "verified": true,
+    "needs_review": false,
+    "findings": [
+      {
+        "kind": "numeric_boundary",
+        "classification": "example",
+        "bound_type": "maximum",
+        "value": 72,
+        "unit": "months",
+        "date": null,
+        "date_direction": null,
+        "date_precision": null,
+        "applies_to": "LTV below 90 percent",
+        "quote": "auto loans with LTV ratios less than 90 percent may have loan terms up to 72 months",
+        "source_file": "pub-ch-retail-lending.pdf",
+        "page_number": 23,
+        "chunk_id": "pub-ch-retail-lending.pdf::efaafc19::p23::c98",
+        "grounded": true,
+        "needs_review": false,
+        "review_reasons": [],
+        "checks": {
+          "grounded": true,
+          "quote_in_source": true,
+          "value_in_quote": true,
+          "value_in_source": true,
+          "direction_cue_found": true,
+          "tag_consistent": true,
+          "warnings": []
+        },
+        "conflicts_with": []
+      },
+      {
+        "kind": "numeric_boundary",
+        "classification": "example",
+        "bound_type": "maximum",
+        "value": 60,
+        "unit": "months",
+        "date": null,
+        "date_direction": null,
+        "date_precision": null,
+        "applies_to": "LTV above 90 percent",
+        "quote": "loans with LTV ratios greater than 90 percent are limited to 60-month",
+        "source_file": "pub-ch-retail-lending.pdf",
+        "page_number": 23,
+        "chunk_id": "pub-ch-retail-lending.pdf::efaafc19::p23::c98",
+        "grounded": true,
+        "needs_review": false,
+        "review_reasons": [],
+        "checks": {
+          "grounded": true,
+          "quote_in_source": true,
+          "value_in_quote": true,
+          "value_in_source": true,
+          "direction_cue_found": true,
+          "tag_consistent": true,
+          "warnings": []
+        },
+        "conflicts_with": []
+      }
+    ],
+    "conflicts": [],
+    "rejected": [],
+    "error": null
+  },
+  "trace": [
+    {
+      "node": "expand",
+      "at": "2026-10-31T21:55:49+05:30",
+      "seconds": 30.613
+    },
+    {
+      "node": "retrieve",
+      "at": "2026-10-31T21:56:20+05:30",
+      "seconds": 200.796
+    },
+    {
+      "node": "extract",
+      "at": "2026-10-31T21:59:41+05:30",
+      "seconds": 60.854
+    },
+    {
+      "node": "verify",
+      "at": "2026-10-31T22:00:43+05:30",
+      "seconds": 0.126
+    },
+    {
+      "node": "respond",
+      "at": "2026-10-31T22:00:43+05:30",
+      "seconds": 0.033
+    }
+  ]
+}

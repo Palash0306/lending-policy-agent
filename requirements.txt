@@ -13,7 +13,7 @@ chromadb>=0.5.0
 sentence-transformers>=3.0.0    # first real run downloads model weights once (~80MB default model), then fully offline
 
 # --- Later phases will add (kept out for now to keep the install lean) ---
-# langgraph           # Phase 7: orchestration
+langgraph           # Phase 7: orchestration
 # fastapi             # Phase 8: chat endpoint
 # uvicorn[standard]   # Phase 8: ASGI server
 # streamlit           # optional frontend
