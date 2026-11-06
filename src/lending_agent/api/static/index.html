@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lending Policy Data Assurance Agent</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #5d6677; --line: #dde1e8;
+    --accent: #1f5fbf; --ok: #1a7f4b; --ok-bg: #e3f5ea; --warn: #9a5b00; --warn-bg: #fdf0d5;
+    --err: #b3261e; --err-bg: #fbe4e2; --none: #4b5563; --none-bg: #eceef2; --quote-bg: #f0f3f8; --sel: #e6eefb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171c; --panel: #1d2128; --text: #e6e9ef; --muted: #98a1b3; --line: #323946;
+      --accent: #6fa3f0; --ok: #62d394; --ok-bg: #173826; --warn: #f0b95a; --warn-bg: #3a2c10;
+      --err: #f28b82; --err-bg: #3d1b19; --none: #b3bbc9; --none-bg: #2a303a; --quote-bg: #262c36; --sel: #26354f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  header { padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel); display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 17px; margin: 0; flex: 1 1 auto; }
+  #status { font-size: 13px; color: var(--muted); }
+  #status b.good { color: var(--ok); } #status b.bad { color: var(--err); }
+  main { display: grid; grid-template-columns: 300px 1fr; gap: 16px; padding: 16px; max-width: 1240px; margin: 0 auto; align-items: start; }
+  @media (max-width: 820px) { main { grid-template-columns: 1fr; } }
+  aside { display: flex; flex-direction: column; gap: 16px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  h2 { font-size: 13px; margin: 0 0 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  button { font: inherit; padding: 7px 14px; border-radius: 7px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+  button.secondary { background: transparent; color: var(--accent); }
+  button.small { padding: 2px 9px; font-size: 12px; }
+  button:disabled { opacity: .5; cursor: default; }
+  input[type=text], select { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg); color: var(--text); max-width: 100%; }
+  ul.list { list-style: none; margin: 10px 0 0; padding: 0; }
+  ul.list li { display: flex; justify-content: space-between; gap: 8px; align-items: center; padding: 6px 4px; border-top: 1px solid var(--line); font-size: 14px; }
+  ul.list .name { overflow-wrap: anywhere; } .meta { color: var(--muted); font-size: 12px; }
+  #convs li.current { background: var(--sel); border-radius: 6px; }
+  #convs .pick { all: unset; cursor: pointer; flex: 1; min-width: 0; }
+  #convs .pick:focus-visible { outline: 2px solid var(--accent); }
+  #convs .pick span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #upload-note { font-size: 13px; color: var(--muted); margin-top: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  #chat { display: flex; flex-direction: column; gap: 12px; min-height: 60vh; }
+  #log { display: flex; flex-direction: column; gap: 14px; flex: 1; }
+  .you { align-self: flex-end; background: var(--accent); color: #fff; padding: 8px 12px; border-radius: 12px 12px 2px 12px; max-width: 80%; overflow-wrap: anywhere; }
+  .card { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 9px; border-radius: 99px; margin-bottom: 6px; }
+  .verified { background: var(--ok-bg); color: var(--ok); } .needs_review { background: var(--warn-bg); color: var(--warn); }
+  .not_found { background: var(--none-bg); color: var(--none); } .error { background: var(--err-bg); color: var(--err); }
+  .answer { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .headline { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+  .headline div { background: var(--quote-bg); border-radius: 8px; padding: 6px 12px; }
+  .headline small { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; }
+  .headline strong { font-size: 18px; }
+  blockquote { margin: 10px 0; padding: 8px 12px; background: var(--quote-bg); border-left: 3px solid var(--accent); border-radius: 4px; overflow-wrap: anywhere; }
+  .src { color: var(--muted); font-size: 13px; }
+  ul.reasons { margin: 8px 0; padding-left: 20px; color: var(--warn); }
+  details { margin-top: 8px; } summary { cursor: pointer; color: var(--accent); font-size: 13px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 6px; display: block; overflow-x: auto; }
+  th, td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; vertical-align: top; }
+  .foot { margin-top: 8px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+  .actions { margin-top: 10px; display: flex; gap: 8px; }
+  .working { color: var(--muted); font-style: italic; }
+  form { display: flex; gap: 8px; flex-wrap: wrap; } #message { flex: 1 1 260px; }
+  .opts { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; font-size: 13px; color: var(--muted); }
+  .hint { font-size: 13px; color: var(--muted); }
+  #title-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Lending Policy Data Assurance Agent</h1>
+  <div id="status" role="status">checking…</div>
+</header>
+<main>
+  <aside>
+    <section>
+      <div id="title-row"><h2 style="margin:0">Conversations</h2><button id="new" type="button" class="secondary small">+ New</button></div>
+      <ul id="convs" class="list"></ul>
+      <p class="hint" id="convs-empty" hidden>No conversations yet. Ask a question to start one. This list is kept in this browser.</p>
+    </section>
+    <section>
+      <h2>Documents</h2>
+      <input type="file" id="files" accept=".pdf,.docx" multiple>
+      <div style="margin-top:8px"><button id="upload" type="button">Upload and index</button></div>
+      <div id="upload-note" aria-live="polite"></div>
+      <ul id="docs" class="list"></ul>
+      <p class="hint" id="docs-empty" hidden>No documents yet. Upload a policy PDF or Word file to begin.</p>
+    </section>
+  </aside>
+  <section id="chat">
+    <h2 id="chat-title">Ask</h2>
+    <div id="log" aria-live="polite"></div>
+    <form id="form">
+      <input type="text" id="message" placeholder="loan_tenure" maxlength="500" autocomplete="off" aria-label="Your question">
+      <button id="send" type="submit">Ask</button>
+    </form>
+    <div class="opts">
+      <label>Search in <select id="source"><option value="">all documents</option></select></label>
+      <label>Look for <select id="kinds"><option value="both">limits and dates</option><option value="boundary">numeric limits only</option><option value="date">date cutoffs only</option></select></label>
+      <label><input type="checkbox" id="fast"> quick mode (reads fewer paragraphs)</label>
+    </div>
+  </section>
+</main>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const LABELS = { verified: "VERIFIED", needs_review: "NEEDS REVIEW", not_found: "NOT FOUND", error: "ERROR" };
+const KEY = { convs: "lpa.conversations", current: "lpa.current", pending: "lpa.pending" };
+const HINT = "Ask for a field, such as loan_tenure, or a question, such as “What is the maximum loan amount?”. Then ask follow-ups like “what about for commercial loans?”. Answers can take a few minutes on a laptop.";
+const MAX_CONVS = 50;
+let convs = readJSON(KEY.convs, []);       // [{id, title, updated}]: the LIST lives in this browser; answers live on the server
+let currentId = readText(KEY.current);     // session id of the open conversation, or null for a new one
+let busy = false;                          // a question is running
+
+/* ---------- small helpers ---------- */
+function readJSON(key, fallback) { try { const v = JSON.parse(localStorage.getItem(key)); return v == null ? fallback : v; } catch (e) { return fallback; } }
+function readText(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
+function writeJSON(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* storage blocked: the page still works, it just forgets on reload */ } }
+function writeText(key, value) { try { if (value == null) localStorage.removeItem(key); else localStorage.setItem(key, value); } catch (e) {} }
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+function fmt(seconds) { const s = Math.round(seconds); return s < 60 ? s + "s" : Math.floor(s / 60) + "m " + String(s % 60).padStart(2, "0") + "s"; }
+
+const PROPS = ["className", "textContent", "value", "title", "hidden", "disabled", "type", "onclick"];
+function el(tag, props, ...kids) {     // DOM built with textContent only: text from the server or a policy is never parsed as HTML
+  const node = document.createElement(tag);
+  for (const k of Object.keys(props || {})) if (PROPS.includes(k)) node[k] = props[k];
+  for (const kid of kids) if (kid != null) node.append(kid);
+  return node;
+}
+async function api(path, options) {
+  const res = await fetch(path, options);
+  let body = null;
+  try { body = await res.json(); } catch (e) { /* not JSON */ }
+  if (!res.ok) {
+    const d = body && body.detail;
+    const err = new Error(typeof d === "string" ? d : (d && d.message) || res.status + " " + res.statusText);
+    err.status = res.status; err.rejected = d && d.rejected;
+    throw err;
+  }
+  return body;
+}
+async function pollJob(jobId, onTick) {        // wait for a job; survives a short loss of contact with the server
+  let misses = 0;
+  for (;;) {
+    let job;
+    try { job = await api("/jobs/" + encodeURIComponent(jobId)); misses = 0; }
+    catch (e) {
+      if (e.status === 404) throw e;
+      if (++misses > 5) throw new Error("Lost contact with the server. Reload the page to pick the question up again.");
+      await sleep(3000); continue;
+    }
+    if (job.status === "done" || job.status === "failed") return job;
+    onTick(job);
+    await sleep(2000);
+  }
+}
+function waitingText(job) {
+  return job.status === "queued" ? "Waiting for the agent to finish another job (" + job.jobs_ahead + " ahead)…"
+    : "Working… " + fmt(job.running_seconds) + ". Ollama is reading the policy; this is normal on a laptop, not frozen.";
+}
+
+/* ---------- status + documents ---------- */
+async function refreshStatus() {
+  const box = $("status");
+  try {
+    const h = await api("/health"), o = h.ollama;
+    box.replaceChildren("Ollama: ", el("b", { className: o.reachable && o.model_available ? "good" : "bad",
+      textContent: !o.reachable ? "not reachable" : (o.model_available ? "ready (" + o.model + ")" : "model " + o.model + " not installed") }));
+    box.append("  ·  " + h.documents + " document(s), " + h.chunks + " chunks");
+    if (h.jobs_pending) box.append("  ·  " + h.jobs_pending + " job(s) running or waiting");
+    if (h.index_error) box.append(el("b", { className: "bad", textContent: "  ·  index problem: " + h.index_error }));
+  } catch (e) { box.replaceChildren(el("b", { className: "bad", textContent: "server not reachable" })); }
+}
+function renderDocs(list) {
+  const ul = $("docs"), sel = $("source"), keep = sel.value;
+  ul.replaceChildren(); sel.replaceChildren(el("option", { value: "", textContent: "all documents" }));
+  for (const d of list.documents) {
+    const del = el("button", { className: "secondary small", textContent: "remove", onclick: () => removeDoc(d.name) });
+    ul.append(el("li", {}, el("span", {}, el("span", { className: "name", textContent: d.name }), el("br"),
+      el("span", { className: "meta", textContent: d.chunks + " chunks" })), del));
+    sel.append(el("option", { value: d.name, textContent: d.name }));
+  }
+  if ([...sel.options].some((o) => o.value === keep)) sel.value = keep;
+  $("docs-empty").hidden = list.documents.length > 0;
+}
+async function loadDocs() { try { renderDocs(await api("/documents")); } catch (e) { $("upload-note").textContent = e.message; } }
+
+$("upload").onclick = async () => {
+  const files = $("files").files, note = $("upload-note");
+  if (!files.length) { note.textContent = "Choose one or more .pdf or .docx files first."; return; }
+  const form = new FormData();
+  for (const f of files) form.append("files", f);
+  $("upload").disabled = true; note.textContent = "Uploading…";
+  try {
+    const job = await api("/documents?wait=false", { method: "POST", body: form });
+    const done = await pollJob(job.job_id, (j) => {
+      note.textContent = j.status === "queued" ? "Waiting for the agent to finish another job…" : "Indexing… " + fmt(j.running_seconds) + " (large files take a while)";
+    });
+    if (done.status === "failed") throw new Error(done.error || "Indexing failed.");
+    const result = done.result, lines = [];
+    for (const d of result.indexed) lines.push("✓ " + d.file + ": " + d.chunks + " chunks");
+    for (const d of result.failed.concat(result.rejected || [])) lines.push("✗ " + d.file + ": " + d.error);
+    note.textContent = lines.join("\n"); renderDocs(result); $("files").value = ""; refreshStatus();
+  } catch (e) {
+    const lines = ["✗ " + e.message];
+    for (const d of e.rejected || []) lines.push("✗ " + d.file + ": " + d.error);
+    note.textContent = lines.join("\n");
+  }
+  $("upload").disabled = false;
+};
+async function removeDoc(name) {
+  if (!confirm("Remove " + name + " from the index?")) return;
+  try {
+    const job = await api("/documents/" + encodeURIComponent(name) + "?wait=false", { method: "DELETE" });
+    const done = await pollJob(job.job_id, () => {});
+    if (done.status === "failed") throw new Error(done.error || "Could not remove it.");
+    renderDocs(done.result); refreshStatus();
+  } catch (e) { $("upload-note").textContent = "✗ " + e.message; }
+}
+
+/* ---------- the conversation list (kept in this browser) ---------- */
+function saveConvs() { convs.sort((a, b) => b.updated - a.updated); convs = convs.slice(0, MAX_CONVS); writeJSON(KEY.convs, convs); }
+function touchConv(id, firstMessage) {
+  const found = convs.find((c) => c.id === id);
+  if (found) found.updated = Date.now();
+  else convs.push({ id, title: firstMessage.length > 40 ? firstMessage.slice(0, 40) + "…" : firstMessage, updated: Date.now() });
+  saveConvs(); renderConvs();
+}
+function renderConvs() {
+  const ul = $("convs");
+  ul.replaceChildren();
+  for (const c of convs) {
+    const pick = el("button", { className: "pick", disabled: busy, onclick: () => openConv(c.id) },
+      el("span", { textContent: c.title }), el("span", { className: "meta", textContent: new Date(c.updated).toLocaleString() }));
+    const del = el("button", { className: "secondary small", textContent: "✕", title: "Delete this conversation", disabled: busy, onclick: () => deleteConv(c.id) });
+    const li = el("li", { className: c.id === currentId ? "current" : "" }, pick, del);
+    ul.append(li);
+  }
+  $("convs-empty").hidden = convs.length > 0;
+}
+function setBusy(value) { busy = value; $("send").disabled = value; $("new").disabled = value; renderConvs(); }
+async function openConv(id) { if (busy) return; currentId = id; writeText(KEY.current, id); renderConvs(); await showConversation(); }
+async function newConv() { if (busy) return; currentId = null; writeText(KEY.current, null); renderConvs(); await showConversation(); $("message").focus(); }
+async function deleteConv(id) {
+  if (busy || !confirm("Delete this conversation? Its answers are removed from the server too.")) return;
+  try { await api("/sessions/" + encodeURIComponent(id), { method: "DELETE" }); } catch (e) { /* already gone: fine */ }
+  convs = convs.filter((c) => c.id !== id); saveConvs();
+  if (currentId === id) { currentId = null; writeText(KEY.current, null); await showConversation(); }
+  renderConvs();
+}
+$("new").onclick = newConv;
+
+/* ---------- answers ---------- */
+function headline(p) {
+  const items = [], unit = p.unit ? " " + p.unit : "";
+  if (p.min_value != null) items.push(["Minimum", p.min_value + unit]);
+  if (p.max_value != null) items.push(["Maximum", p.max_value + unit]);
+  if (p.cutoff_date) items.push(["Cutoff date", String(p.date_direction || "").replaceAll("_", " ") + " " + p.cutoff_date + (p.date_precision === "month" ? " (month only)" : "")]);
+  if (!items.length) return null;
+  return el("div", { className: "headline" }, ...items.map(([k, v]) => el("div", {}, el("small", { textContent: k }), el("strong", { textContent: v }))));
+}
+function findingWhat(f) {
+  return f.kind === "numeric_boundary" ? f.bound_type + " " + f.value + (f.unit ? " " + f.unit : "")
+    : String(f.date_direction || "").replaceAll("_", " ") + " " + f.date;
+}
+function findingsTable(findings) {
+  const head = ["#", "Kind", "What", "Type", "Grounded", "Source", "Quote"];
+  const rows = findings.map((f, i) => [i + 1, f.kind === "numeric_boundary" ? "limit" : "date", findingWhat(f) + (f.applies_to ? " (" + f.applies_to + ")" : ""),
+    f.classification, f.grounded ? "yes" : "NO", f.source_file + (f.page_number ? ", p." + f.page_number : ""), f.quote]);
+  return el("table", {}, el("tr", {}, ...head.map((h) => el("th", { textContent: h }))),
+    ...rows.map((r) => el("tr", {}, ...r.map((c) => el("td", { textContent: String(c) })))));
+}
+function renderAnswer(p, message) {
+  const card = el("div", { className: "card" });
+  card.append(el("span", { className: "badge " + p.route, textContent: LABELS[p.route] || p.route }));
+  card.append(el("div", { className: "answer", textContent: p.answer }));
+  const h = headline(p);
+  if (h) card.append(h);
+  if (p.source_quote) {
+    card.append(el("blockquote", { textContent: "“" + p.source_quote + "”" }));
+    card.append(el("div", { className: "src", textContent: "Source: " + p.source_file + (p.page_number ? ", page " + p.page_number : "") }));
+  }
+  if (p.review_reasons && p.review_reasons.length) card.append(el("ul", { className: "reasons" }, ...p.review_reasons.map((r) => el("li", { textContent: r }))));
+  if (p.conflicts && p.conflicts.length) card.append(el("ul", { className: "reasons" }, ...p.conflicts.map((c) =>
+    el("li", { textContent: "Conflict in " + c.limit + ": " + c.values.map((v) => v.value + " (" + v.source_file + ")").join(" vs ") }))));
+  if (p.findings && p.findings.length) card.append(el("details", {}, el("summary", { textContent: "All findings (" + p.findings.length + ")" }), findingsTable(p.findings)));
+  if (p.rejected && p.rejected.length) card.append(el("details", {}, el("summary", { textContent: "Discarded model answers (" + p.rejected.length + ")" }), el("ul", {}, ...p.rejected.map((r) => el("li", { textContent: r })))));
+  const foot = [];
+  if (p.rewritten && p.query_used) foot.push("Searched for: “" + p.query_used + "”");
+  if (p.attempts > 1) foot.push(p.attempts + " extraction attempts");
+  if (p.widened_search) foot.push("search widened");
+  foot.push("took " + fmt(p.elapsed_seconds || 0));
+  card.append(el("div", { className: "foot", textContent: foot.join("  ·  ") }));
+  if (p.route === "verified" || p.route === "needs_review") card.append(el("div", { className: "foot", textContent: "Spot-check the quoted page before using any value in a test plan." }));
+  if (p.route !== "error" || p.field) card.append(el("div", { className: "actions" }, el("button", { className: "secondary small", textContent: "Report (.md)", onclick: () => downloadReport(p, message) })));
+  return card;
+}
+
+/* ---------- "Report (.md)": built here in the browser from the answer shown ---------- */
+const mdCell = (v) => String(v == null ? "" : v).replace(/\|/g, "\\|").replace(/\s*\n\s*/g, " ");
+const mdQuote = (text) => String(text).split("\n").map((l) => "> " + l).join("\n");
+function buildReport(p, message, now) {
+  const L = [], when = (now || new Date()).toLocaleString();
+  L.push("# Lending policy check: " + (p.field || message), "");
+  L.push("- Generated: " + when, "- Question: " + message);
+  if (p.rewritten && p.query_used) L.push("- Searched for: " + p.query_used);
+  L.push("- Result: " + (LABELS[p.route] || p.route));
+  if (p.source_file) L.push("- Document: " + p.source_file + (p.page_number ? ", page " + p.page_number : ""));
+  L.push("", "## Answer", "", p.answer || "");
+  const unit = p.unit ? " " + p.unit : "", values = [];
+  if (p.min_value != null) values.push(["Minimum", p.min_value + unit]);
+  if (p.max_value != null) values.push(["Maximum", p.max_value + unit]);
+  if (p.cutoff_date) values.push(["Cutoff date", String(p.date_direction || "").replaceAll("_", " ") + " " + p.cutoff_date + (p.date_precision === "month" ? " (month only: day not stated)" : "")]);
+  if (values.length) { L.push("", "## Values", "", "| What | Value |", "| --- | --- |"); for (const [k, v] of values) L.push("| " + mdCell(k) + " | " + mdCell(v) + " |"); }
+  if (p.source_quote) L.push("", "## Source quote", "", mdQuote(p.source_quote), "", "Source: " + p.source_file + (p.page_number ? ", page " + p.page_number : ""));
+  if (p.review_reasons && p.review_reasons.length) { L.push("", "## For a person to check", ""); for (const r of p.review_reasons) L.push("- " + r); }
+  if (p.conflicts && p.conflicts.length) {
+    L.push("", "## Conflicts", "");
+    for (const c of p.conflicts) L.push("- " + c.limit + ": " + c.values.map((v) => v.value + " (" + v.source_file + (v.page_number ? ", p." + v.page_number : "") + ")").join(" vs "));
+  }
+  if (p.findings && p.findings.length) {
+    L.push("", "## All findings", "", "| # | What | Type | Grounded | Source | Quote |", "| --- | --- | --- | --- | --- | --- |");
+    p.findings.forEach((f, i) => L.push("| " + [i + 1, findingWhat(f) + (f.applies_to ? " (" + f.applies_to + ")" : ""), f.classification, f.grounded ? "yes" : "NO",
+      f.source_file + (f.page_number ? ", p." + f.page_number : ""), f.quote].map(mdCell).join(" | ") + " |"));
+  }
+  if (p.rejected && p.rejected.length) { L.push("", "## Discarded model answers", ""); for (const r of p.rejected) L.push("- " + r); }
+  const run = [];
+  if (p.attempts) run.push(p.attempts + " extraction attempt(s)");
+  if (p.widened_search) run.push("search widened");
+  if (p.elapsed_seconds != null) run.push("took " + fmt(p.elapsed_seconds));
+  if (run.length) L.push("", "## Run", "", run.join(", ") + ".");
+  if (p.trace && p.trace.length) { L.push("", "| Step | Seconds |", "| --- | --- |"); for (const t of p.trace) L.push("| " + mdCell(t.node) + " | " + mdCell(t.seconds) + " |"); }
+  L.push("", "---", "Generated by the Lending Policy Data Assurance Agent. Spot-check the quoted page before using any value in a test plan.", "");
+  return L.join("\n");
+}
+function downloadReport(p, message) {
+  const day = new Date().toISOString().slice(0, 10), name = String(p.field || "answer").replace(/[^A-Za-z0-9_-]+/g, "_").slice(0, 60);
+  const url = URL.createObjectURL(new Blob([buildReport(p, message)], { type: "text/markdown;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url; link.download = "report_" + name + "_" + day + ".md";
+  document.body.append(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/* ---------- showing a conversation, asking, and picking a running question back up ---------- */
+const log = () => $("log");
+function addToLog(node) { log().append(node); if (node.scrollIntoView) node.scrollIntoView({ block: "end", behavior: "smooth" }); return node; }
+const youBubble = (text) => el("div", { className: "you", textContent: text });
+function errorCard(text) { return renderAnswer({ route: "error", answer: text, elapsed_seconds: 0 }, ""); }
+
+async function showConversation() {
+  const title = convs.find((c) => c.id === currentId);
+  $("chat-title").textContent = title ? title.title : "Ask";
+  log().replaceChildren();
+  if (!currentId) { addToLog(el("p", { className: "hint", textContent: HINT })); return; }
+  try {
+    const s = await api("/sessions/" + encodeURIComponent(currentId));
+    if (!s.turns.length) addToLog(el("p", { className: "hint", textContent: HINT }));
+    for (const t of s.turns) { addToLog(youBubble(t.message)); addToLog(renderAnswer(t.payload, t.message)); }
+  } catch (e) {
+    addToLog(el("p", { className: "hint", textContent: e.status === 404
+      ? "This conversation is no longer on the server (answers are kept for about 8 hours, and a server restart clears them). You can delete it from the list."
+      : "Could not load this conversation: " + e.message }));
+  }
+}
+function finishQuestion(job, waiting, message) {          // turn a finished job into an answer card
+  writeText(KEY.pending, null);
+  if (job.status === "failed") waiting.replaceWith(errorCard("I could not answer this: " + (job.error || "the job failed.")));
+  else { waiting.replaceWith(renderAnswer(job.result, message)); if (job.result.session_id) { currentId = job.result.session_id; writeText(KEY.current, currentId); touchConv(currentId, message); } }
+}
+async function followJob(jobId, waiting, message) {
+  try { finishQuestion(await pollJob(jobId, (j) => { waiting.textContent = waitingText(j); }), waiting, message); }
+  catch (e) {
+    if (e.status === 404) { writeText(KEY.pending, null); waiting.replaceWith(errorCard("The server no longer has this question (it may have been restarted). Please ask it again.")); }
+    else waiting.replaceWith(errorCard(e.message));       // contact lost: the question stays saved, a reload picks it up again
+  }
+  setBusy(false); refreshStatus();
+}
+$("form").onsubmit = async (event) => {
+  event.preventDefault();
+  const message = $("message").value.trim();
+  if (!message || busy) return;
+  setBusy(true); $("message").value = "";
+  if (log().querySelector(".hint")) log().replaceChildren();
+  addToLog(youBubble(message));
+  const waiting = addToLog(el("div", { className: "card working", textContent: "Starting…" }));
+  const body = { message, session_id: currentId, source_file: $("source").value || null, kinds: $("kinds").value, fast: $("fast").checked };
+  try {
+    const job = await api("/chat?wait=false", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    currentId = job.session_id; writeText(KEY.current, currentId); touchConv(currentId, message);
+    writeJSON(KEY.pending, { job_id: job.job_id, session_id: job.session_id, message, started: Date.now() });   // so a reload can pick it up
+    await followJob(job.job_id, waiting, message);
+  } catch (e) { waiting.replaceWith(errorCard("I could not start this question: " + e.message)); setBusy(false); }
+  $("message").focus();
+};
+async function resumePending() {                           // a question was running when the page was closed or reloaded
+  const p = readJSON(KEY.pending, null);
+  if (!p || !p.job_id) return;
+  currentId = p.session_id; writeText(KEY.current, currentId); renderConvs();
+  let job = null;
+  try { job = await api("/jobs/" + encodeURIComponent(p.job_id)); } catch (e) { /* unknown job: handled below */ }
+  if (job && (job.status === "done" || job.status === "failed")) { writeText(KEY.pending, null); await showConversation(); return; }   // answer is already in the conversation
+  await showConversation();
+  if (!job) { writeText(KEY.pending, null); addToLog(errorCard("The question you were asking is no longer on the server (it may have been restarted). Please ask it again.")); return; }
+  setBusy(true);
+  addToLog(youBubble(p.message));
+  const waiting = addToLog(el("div", { className: "card working", textContent: waitingText(job) }));
+  await followJob(p.job_id, waiting, p.message);
+}
+
+async function init() {
+  renderConvs(); refreshStatus(); setInterval(refreshStatus, 30000);
+  await loadDocs();
+  if (readJSON(KEY.pending, null)) await resumePending(); else await showConversation();
+}
+init();
+</script>
+</body>
+</html>

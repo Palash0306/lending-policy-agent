@@ -13,6 +13,8 @@ brief). This drop implements:
 - **Phase 4** — Field synonym expansion (plus evidence retrieval across phrasings)
 - **Phase 5** — Boundary + date-cutoff extraction with a structured schema and classification tag
 - **Phase 6** — Grounding verification (plain-code check of every quote, number and date) and a conflict flag for human review
+- **Phase 7** — LangGraph agent: retry with feedback, widen the search once, and route each answer to verified / needs_review / not_found / error
+- **Phase 8** — FastAPI chat server (`/chat` with conversation history), multi-file upload, and a simple web page
 
 ---
 
@@ -48,7 +50,18 @@ lending-policy-agent/
 │       │   ├── text_values.py       # numbers_in_text / dates_in_text, shared by focus and grounding
 │       │   ├── grounding.py         # check_finding: re-check quote, number/date and wording against the source text
 │       │   ├── assurance.py         # verify_extraction: grounding + review flags + conflict detection
+│       │   ├── graph.py             # Phase 7: the LangGraph agent (build_graph / ask)
 │       │   └── llm_json.py          # shared helper: pull a JSON object out of an LLM reply
+│       ├── api/                     # Phase 8: the chat server
+│       │   ├── __init__.py
+│       │   ├── app.py               # FastAPI routes (thin: connects URLs to the services below)
+│       │   ├── chat.py              # ChatService: sessions, follow-up rewriting, runs the agent
+│       │   ├── summary.py           # agent answer -> chat JSON (headline values, review routing; no LLM)
+│       │   ├── sessions.py          # SessionStore: server-side conversation history
+│       │   ├── jobs.py              # JobRunner: one worker, so questions never run at the same time
+│       │   ├── documents.py         # upload checks, indexing, listing, removal
+│       │   ├── errors.py            # ApiError (becomes an HTTP status)
+│       │   └── static/index.html    # the web page (one file, no internet needed)
 │       └── indexing/
 │           ├── __init__.py
 │           ├── embeddings.py        # EmbeddingModel: local sentence-transformers wrapper
@@ -60,7 +73,9 @@ lending-policy-agent/
 │   ├── index_documents.py           # CLI: chunk + embed + store into Chroma
 │   ├── search_index.py              # CLI: semantic search against the indexed collection
 │   ├── expand_field.py              # CLI: see how a field gets expanded (and what it finds)
-│   └── extract_field.py             # CLI: expand + retrieve + extract + verify, the full flow so far
+│   ├── extract_field.py             # CLI: expand + retrieve + extract + verify, the full flow so far
+│   ├── run_agent.py                 # CLI: the Phase 7 agent for one or many fields
+│   └── serve.py                     # CLI: start the chat server + web page (Phase 8)
 └── tests/
     ├── conftest.py                  # sample .pdf/.docx files + a deterministic fake embedder
     ├── test_ollama_client.py        # Phase 1: mocked, no live server needed
@@ -77,7 +92,15 @@ lending-policy-agent/
     ├── test_focus.py                # focus trimming
     ├── test_text_values.py          # number words, day-word dates, month-level dates
     ├── test_grounding.py            # Phase 6: number/date/quote/direction checks (plain text, no LLM)
-    └── test_assurance.py            # Phase 6: verified/needs-review flags and conflict detection
+    ├── test_assurance.py            # Phase 6: verified/needs-review flags and conflict detection
+    ├── test_graph.py                # Phase 7: agent routes and loops (scripted model)
+    ├── api_helpers.py               # Phase 8: shared fakes (scripted model, in-memory store)
+    ├── test_api_summary.py          # Phase 8: headline values, review routing
+    ├── test_api_sessions.py         # Phase 8: history, expiry, id checks
+    ├── test_api_jobs.py             # Phase 8: one-at-a-time queue
+    ├── test_api_documents.py        # Phase 8: upload safety, indexing, replace, delete
+    ├── test_api_chat.py             # Phase 8: follow-ups, error handling
+    └── test_api_app.py              # Phase 8: the real HTTP routes (skipped if fastapi is not installed)
 ```
 
 `OllamaClient` is deliberately the *only* thing later phases (retrieval,
@@ -410,8 +433,99 @@ One catch: the best 6 paragraphs may all come from one document, so a rule in an
 could be missed. Reading the best paragraphs of each document separately would catch it
 but costs more time per document; that is a design choice for later phases.
 
+## Phase 7: the agent (LangGraph)
+
+`scripts/run_agent.py` runs the same four steps as `extract_field.py`, but as a graph that can
+loop (`src/lending_agent/agent/graph.py`):
+- **retry**: if the model's reply was not valid JSON, or a finding failed the grounding check,
+  extraction runs again (at most `--max-attempts` in total) with the problems written into the prompt;
+- **widen**: if nothing was found, the search is repeated once with twice as many paragraphs (`--no-widen` turns this off);
+- **route**: every answer ends as `verified`, `needs_review`, `not_found` or `error`. Ollama being
+  unreachable is always `error`, never "not found".
+
+```bash
+python scripts/run_agent.py loan_tenure
+python scripts/run_agent.py loan_tenure loan_amount --out-dir results --resume
+```
+
+## Phase 8: chat server, upload and web page
+
+```bash
+pip install -r requirements.txt         # adds fastapi, uvicorn, python-multipart
+python scripts/serve.py                 # then open http://127.0.0.1:8000
+```
+The page lets you upload one or more `.pdf`/`.docx` files (they are chunked, embedded and indexed
+into Chroma exactly like `index_documents.py`), list or remove indexed documents, and chat.
+Uploaded files are kept in `./uploads` (`UPLOAD_DIR` in `.env`).
+
+**The API** (interactive docs at `http://127.0.0.1:8000/docs`):
+
+| Call | What it does |
+|---|---|
+| `POST /chat` | Ask a question. Body: `{"message": "...", "session_id": null, "source_file": null, "kinds": "both", "fast": false}` |
+| `GET /jobs/{job_id}` | Progress or result of a question or upload started with `?wait=false` |
+| `GET /sessions/{id}`, `DELETE /sessions/{id}` | The conversation so far / forget it |
+| `GET /documents`, `POST /documents`, `DELETE /documents/{name}` | What is indexed / upload files / remove one |
+| `GET /health` | Server, Ollama (reachable? model installed?) and index status |
+
+```bash
+curl -s localhost:8000/chat -H 'Content-Type: application/json' \
+     -d '{"message": "What is the maximum loan tenure allowed?"}'
+```
+returns, among other fields:
+```json
+{"answer": "For loan_tenure: maximum 30 years, per policy.pdf, page 12.", "field": "loan_tenure",
+ "route": "verified", "max_value": 30, "unit": "years", "source_quote": "...", "source_file": "policy.pdf",
+ "page_number": 12, "grounded": true, "needs_review": false, "session_id": "...", "turn": 1,
+ "query_used": "What is the maximum loan tenure allowed?", "findings": [...], "review_reasons": []}
+```
+
+**Reading an answer.**
+- `max_value`, `min_value` and `cutoff_date` are filled only from findings that are **grounded and tagged
+  `firm_rule`**, and only when they agree. Tiered limits (72 months below 90 percent LTV, 60 above) leave
+  them empty; every value is in `answer` and `findings`.
+- `route` is the agent's route with one extra rule: if values were found but none is a grounded firm rule
+  (only examples or guidance), it becomes `needs_review`. The agent's own route is in `agent_route`.
+- `not_found` is a normal answer, and `error` means no answer could be produced (Ollama down, no index...).
+  Both come back as HTTP 200 with the reason in the JSON.
+
+**Follow-up questions.** Send the returned `session_id` with your next message. History is kept on the
+server. A message that names a field (`loan_tenure`, "loan amount"...) is used as written. Otherwise the
+local model rewrites it using the previous question ("what about for commercial loans?" becomes "What is
+the maximum loan tenure for commercial loans?"). The rewrite is untrusted: it must be one short line and
+may not contain a number that is not already in the conversation; if it fails, plain code prepends the
+previous field's name. `query_used` always shows what was really searched.
+
+**Why `?wait=false` and a job queue.** One question can take minutes on a laptop, and browsers give up on a
+request that stays silent that long. So the web page starts a job and checks on it every 2 seconds.
+`POST /chat` and `POST /documents` also work as one simple call (they wait and return the result), which is
+what scripts and curl want. There is exactly **one worker**: questions and uploads run one at a time, in
+order. On a laptop where two runs at once would freeze the machine, that is deliberate.
+
+**Conversations and the web page.**
+- The *list* of your conversations is kept in the browser (localStorage); the *answers* live on the server, in
+  memory, for about 8 hours (`SESSION_TTL_MINUTES`).
+- A question that is still running keeps running if you reload the page, and the page picks it up again.
+- "Report (.md)" builds a Markdown report in the browser from the answer you are looking at.
+
+**Safety.**
+- Uploaded file names are reduced to a harmless name (no folders). Only `.pdf`/`.docx` files whose first bytes
+  really match are accepted, and there is a size limit (`MAX_UPLOAD_MB`, default 50).
+- Re-uploading a file with the name of an indexed one replaces it **safely**: the new file is read and split
+  first, and the old version is removed only if that worked. A broken or text-less file never removes a good one.
+- Basic security headers are sent on every response (no framing, no content sniffing, no caching, a
+  same-origin-only content policy).
+- **There is no login.** The server listens on `127.0.0.1` only. Do not use `--host 0.0.0.0` on a network you do
+  not trust.
+
+**Known limitations** (not bugs to wait for a fix on):
+- Conversations are in memory: a server restart clears them. Documents and the index stay.
+- Documents indexed from the command line (`index_documents.py`) do not show on the page until the server restarts.
+- A follow-up question costs one extra Ollama call (slow on a CPU). If that call fails, plain code is used instead.
+- There is no login; the server listens on `127.0.0.1` by default.
+- Re-uploading overwrites the saved copy of the file even if the new one is broken. The index stays safe.
+
 ## What's *not* in this drop
 
-LangGraph orchestration, the FastAPI `/chat` endpoint with a web page, the run
-report file, and final CI (Phases 7–9). `requirements.txt` reflects only what Phases 1–6 need; later phases will add `langgraph`, `fastapi`, and `uvicorn` as those
-pieces land.
+The run report file (Markdown + JSON) and final CI/coverage work (Phase 9), plus the stretch goal of generating
+test values. `requirements.txt` reflects what Phases 1–8 need.

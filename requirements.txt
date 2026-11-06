@@ -12,8 +12,11 @@ fpdf2>=2.7.0        # test-only: generates sample PDFs for tests/conftest.py; no
 chromadb>=0.5.0
 sentence-transformers>=3.0.0    # first real run downloads model weights once (~80MB default model), then fully offline
 
-# --- Later phases will add (kept out for now to keep the install lean) ---
-langgraph           # Phase 7: orchestration
-# fastapi             # Phase 8: chat endpoint
-# uvicorn[standard]   # Phase 8: ASGI server
-# streamlit           # optional frontend
+# --- Phase 7: orchestration ---
+langgraph
+
+# --- Phase 8: chat server ---
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.9   # needed by FastAPI for file uploads
+httpx>=0.27.0             # test-only: FastAPI's test client (tests/test_api_app.py)

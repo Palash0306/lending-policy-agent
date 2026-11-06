@@ -113,6 +113,30 @@ class VectorStore:
             )
         return results
 
+    def sources(self) -> dict[str, int]:
+        """Every indexed file and how many chunks it has: {source_file: chunk_count}."""
+        collection = self._get_collection()
+        counts: dict[str, int] = {}
+        offset, page = 0, 1000
+        while True:
+            raw = collection.get(include=["metadatas"], limit=page, offset=offset)
+            ids = raw.get("ids") or []
+            if not ids:
+                break
+            for meta in raw.get("metadatas") or []:
+                name = (meta or {}).get("source_file", "")
+                counts[name] = counts.get(name, 0) + 1
+            offset += len(ids)
+        return dict(sorted(counts.items()))
+
+    def delete_source(self, source_file: str) -> int:
+        """Remove every chunk of one file. Returns how many chunks were removed (0 if it was not indexed)."""
+        collection = self._get_collection()
+        ids = collection.get(where={"source_file": source_file}, include=["metadatas"]).get("ids") or []
+        if ids:
+            collection.delete(ids=ids)
+        return len(ids)
+
     def reset(self) -> None:
         """Delete the collection entirely. Used by tests and the CLI's --reset flag."""
         client = self._get_client()

@@ -108,3 +108,31 @@ class TestReset:
     def test_reset_on_an_empty_store_does_not_raise(self, tmp_path, fake_embedding_model):
         store = _store(tmp_path, fake_embedding_model)
         store.reset()  # nothing exists yet -- should be a harmless no-op
+
+
+class TestSourcesAndDelete:
+    def test_sources_counts_chunks_per_file(self, tmp_path, fake_embedding_model):
+        store = _store(tmp_path, fake_embedding_model)
+        store.add_chunks([
+            _make_chunk("a1", "loan amount shall not exceed 500000", source_file="a.pdf"),
+            _make_chunk("a2", "applicant age must be at least 21", source_file="a.pdf", chunk_index=1),
+            _make_chunk("b1", "interest rate is capped at 36 percent", source_file="b.pdf"),
+        ])
+        assert store.sources() == {"a.pdf": 2, "b.pdf": 1}
+
+    def test_sources_of_an_empty_store(self, tmp_path, fake_embedding_model):
+        assert _store(tmp_path, fake_embedding_model).sources() == {}
+
+    def test_delete_source_removes_only_that_file(self, tmp_path, fake_embedding_model):
+        store = _store(tmp_path, fake_embedding_model)
+        store.add_chunks([
+            _make_chunk("a1", "loan amount shall not exceed 500000", source_file="a.pdf"),
+            _make_chunk("b1", "interest rate is capped at 36 percent", source_file="b.pdf"),
+        ])
+        assert store.delete_source("a.pdf") == 1
+        assert store.sources() == {"b.pdf": 1} and store.count() == 1
+
+    def test_deleting_an_unknown_file_removes_nothing(self, tmp_path, fake_embedding_model):
+        store = _store(tmp_path, fake_embedding_model)
+        store.add_chunks([_make_chunk("a1", "loan amount shall not exceed 500000", source_file="a.pdf")])
+        assert store.delete_source("ghost.pdf") == 0 and store.count() == 1

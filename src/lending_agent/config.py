@@ -8,7 +8,7 @@ across the codebase.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 try:
     from dotenv import load_dotenv
@@ -51,10 +51,24 @@ class ChromaSettings:
 
 
 @dataclass(frozen=True)
+class ApiSettings:
+    """Chat API settings (Phase 8)."""
+
+    host: str = os.getenv("API_HOST", "127.0.0.1")           # localhost only by default: the API has no login
+    port: int = int(os.getenv("API_PORT", "8000"))
+    upload_dir: str = os.getenv("UPLOAD_DIR", "./uploads")   # where uploaded policy files are kept
+    max_upload_mb: int = int(os.getenv("MAX_UPLOAD_MB", "50"))
+    max_sessions: int = int(os.getenv("MAX_SESSIONS", "200"))
+    session_ttl_minutes: int = int(os.getenv("SESSION_TTL_MINUTES", "480"))
+    max_turns_per_session: int = int(os.getenv("MAX_TURNS_PER_SESSION", "30"))
+
+
+@dataclass(frozen=True)
 class Settings:
     ollama: OllamaSettings
     embedding: EmbeddingSettings
     chroma: ChromaSettings
+    api: ApiSettings = field(default_factory=ApiSettings)
 
 
 def get_settings() -> Settings:
@@ -63,4 +77,5 @@ def get_settings() -> Settings:
         ollama=OllamaSettings(),
         embedding=EmbeddingSettings(),
         chroma=ChromaSettings(),
+        api=ApiSettings(),
     )
