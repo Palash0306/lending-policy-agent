@@ -111,7 +111,7 @@ def test_documents_to_one_excel_file(client):
     assert {d["name"] for d in upload.json()["documents"]} == {"policy.pdf", "rules.docx"}
 
     # 2. run a batch of three fields through the real agent graph
-    accepted = client.post("/batches", json={"fields": "loan_tenure, loan_amount\neffective_date"})
+    accepted = client.post("/batches", json={"fields": ["loan_tenure", "loan_amount", "effective_date"]})
     assert accepted.status_code == 202
     batch_id, end = accepted.json()["batch_id"], time.monotonic() + 60
     while time.monotonic() < end:
