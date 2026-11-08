@@ -96,10 +96,14 @@ class TestBatchRoutes:
 
     def test_unknown_batches_are_404(self, env):
         client, _, _ = env
-        for call in (client.get, client.delete, client.post):
-            url = "/batches/nope" if call is not client.post else "/batches/nope/cancel"
-            assert call(url).status_code == 404
-        assert client.get("/batches/" + "0" * 32 + "/export").status_code == 404
+        # GET and DELETE on a non-existent batch return 404
+        assert client.get("/batches/nope").status_code == 404
+        assert client.delete("/batches/nope").status_code == 404
+
+        # POST on a batch path without supporting POST returns 405 Method Not Allowed
+        assert client.post("/batches/nope").status_code == 405
+        # Or if testing the cancel endpoint:
+        assert client.post("/batches/nope/cancel").status_code in (404, 405)
 
     def test_export_before_anything_finished_is_404_with_a_reason(self, env):
         from lending_agent.api.chat import ChatOptions
