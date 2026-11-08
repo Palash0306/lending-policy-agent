@@ -61,6 +61,8 @@ class ApiSettings:
     max_sessions: int = int(os.getenv("MAX_SESSIONS", "200"))
     session_ttl_minutes: int = int(os.getenv("SESSION_TTL_MINUTES", "480"))
     max_turns_per_session: int = int(os.getenv("MAX_TURNS_PER_SESSION", "30"))
+    batch_dir: str = os.getenv("BATCH_DIR", "./data/batches")        # every batch result is saved here as it finishes
+    max_batch_fields: int = int(os.getenv("MAX_BATCH_FIELDS", "50"))  # most fields accepted in one batch
 
 
 @dataclass(frozen=True)

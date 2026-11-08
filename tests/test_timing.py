@@ -103,7 +103,7 @@ class TestHeartbeat:
         timer.start()
         with timer.step("Slow step", heartbeat_every=0.05):
             time.sleep(0.3)
-        beats = [l for l in lines if "still working" in l]
+        beats = [line for line in lines if "still working" in line]
         assert len(beats) >= 2
         count_after = len(lines)
         time.sleep(0.2)
@@ -114,12 +114,12 @@ class TestHeartbeat:
         timer = RunTimer(write=lines.append)
         with timer.step("Quick step", heartbeat_every=5):
             pass
-        assert not any("still working" in l for l in lines)
+        assert not any("still working" in line for line in lines)
 
     def test_the_note_is_added_to_each_heartbeat_line(self):
         lines = []
         timer = RunTimer(write=lines.append)
         with timer.step("Slow step", heartbeat_every=0.05, note="Loading the model."):
             time.sleep(0.2)
-        beats = [l for l in lines if "still working" in l]
-        assert beats and all(l.endswith("Loading the model.") for l in beats)
+        beats = [line for line in lines if "still working" in line]
+        assert beats and all(line.endswith("Loading the model.") for line in beats)

@@ -141,6 +141,23 @@ class ChatService:
             raise ApiError(422, f"kinds must be one of {', '.join(KIND_CHOICES)}.")
         return message, options
 
+    def answer_one(self, query: str, options: ChatOptions) -> dict:
+        """Run the agent on one question and return the answer payload. Never raises: a crash becomes an error answer.
+        Used by /chat and by batches, so both go through exactly the same graph."""
+        began = time.monotonic()
+        try:
+            graph = (self._build or self._default_build)(options)
+            payload = build_payload((self._run or self._default_run)(graph, query))
+        except Exception as exc:                  # embedding model missing, Chroma unreadable...: report it
+            payload = {"field": None, "agent_route": ROUTE_ERROR, "route": ROUTE_ERROR, "grounded": False,
+                       "needs_review": False, "review_reasons": [], "findings": [], "conflicts": [], "rejected": [],
+                       "error": f"{type(exc).__name__}: {exc}", "attempts": 0, "widened_search": False, "trace": [],
+                       "search": {}, "answer": f"I could not answer this: {type(exc).__name__}: {exc}"}
+        payload.update(query_used=query, rewritten=False,
+                       options={"source_file": options.source_file, "kinds": options.kinds, "fast": options.fast},
+                       elapsed_seconds=round(time.monotonic() - began, 1))
+        return payload
+
     def chat(self, message: str, session_id: str | None = None, options: ChatOptions | None = None) -> dict:
         message, options = self.prepare(message, options)
         session = self.sessions.get_or_create(session_id)
@@ -149,17 +166,8 @@ class ChatService:
         if session.turns and not mentions_known_field(message):
             query, rewritten = rewrite_follow_up(message, session.turns[-1], self.llm)
 
-        try:
-            graph = (self._build or self._default_build)(options)
-            answer = (self._run or self._default_run)(graph, query)
-            payload = build_payload(answer)
-        except Exception as exc:                  # embedding model missing, Chroma unreadable...: report it, keep the session
-            payload = {"field": None, "agent_route": ROUTE_ERROR, "route": ROUTE_ERROR, "grounded": False,
-                       "needs_review": False, "review_reasons": [], "findings": [], "conflicts": [], "rejected": [],
-                       "error": f"{type(exc).__name__}: {exc}", "attempts": 0, "widened_search": False, "trace": [],
-                       "answer": f"I could not answer this: {type(exc).__name__}: {exc}"}
+        payload = self.answer_one(query, options)
         payload.update(session_id=session.session_id, message=message, query_used=query, rewritten=rewritten,
-                       options={"source_file": options.source_file, "kinds": options.kinds, "fast": options.fast},
                        elapsed_seconds=round(time.monotonic() - began, 1))
         turn = self.sessions.add_turn(session.session_id, message, payload)
         payload["turn"] = turn["turn"]

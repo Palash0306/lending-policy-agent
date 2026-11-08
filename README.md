@@ -15,6 +15,7 @@ brief). This drop implements:
 - **Phase 6** — Grounding verification (plain-code check of every quote, number and date) and a conflict flag for human review
 - **Phase 7** — LangGraph agent: retry with feedback, widen the search once, and route each answer to verified / needs_review / not_found / error
 - **Phase 8** — FastAPI chat server (`/chat` with conversation history), multi-file upload, and a simple web page
+- **Phase 9** — batch runs for many fields, one Excel workbook of test values, test coverage and CI, and the guides in `docs/`
 
 ---
 
@@ -41,6 +42,8 @@ lending-policy-agent/
 │       │   ├── chunker.py           # chunk_text: sentence-aware, overlapping chunks
 │       │   └── pipeline.py          # ingest_document(s): file(s)/folder -> list[Chunk]
 │       ├── timing.py                # RunTimer: start/end times, per-step durations, still-working heartbeat
+│       ├── testcases.py             # Phase 9: findings -> test values (boundary maths, dates, inclusive/exclusive wording)
+│       ├── export_xlsx.py           # Phase 9: the Excel workbook and csv (formula-injection safe)
 │       ├── agent/
 │       │   ├── __init__.py
 │       │   ├── field_expansion.py   # expand_field_terms: field name/question -> phrasings to search for
@@ -60,6 +63,7 @@ lending-policy-agent/
 │       │   ├── sessions.py          # SessionStore: server-side conversation history
 │       │   ├── jobs.py              # JobRunner: one worker, so questions never run at the same time
 │       │   ├── documents.py         # upload checks, indexing, listing, removal
+│       │   ├── batches.py           # Phase 9: BatchManager (parse fields, run one by one, save each result, cancel, restart-safe)
 │       │   ├── errors.py            # ApiError (becomes an HTTP status)
 │       │   └── static/index.html    # the web page (one file, no internet needed)
 │       └── indexing/
@@ -75,7 +79,9 @@ lending-policy-agent/
 │   ├── expand_field.py              # CLI: see how a field gets expanded (and what it finds)
 │   ├── extract_field.py             # CLI: expand + retrieve + extract + verify, the full flow so far
 │   ├── run_agent.py                 # CLI: the Phase 7 agent for one or many fields
-│   └── serve.py                     # CLI: start the chat server + web page (Phase 8)
+│   ├── serve.py                     # CLI: start the chat server + web page (Phase 8)
+│   ├── ci.sh                        # Phase 9: the one script any CI system runs (lint, tests, coverage, audit)
+│   └── check_no_documents.sh        # Phase 9: fails if a .pdf/.docx is staged or tracked in git
 └── tests/
     ├── conftest.py                  # sample .pdf/.docx files + a deterministic fake embedder
     ├── test_ollama_client.py        # Phase 1: mocked, no live server needed
@@ -100,7 +106,17 @@ lending-policy-agent/
     ├── test_api_jobs.py             # Phase 8: one-at-a-time queue
     ├── test_api_documents.py        # Phase 8: upload safety, indexing, replace, delete
     ├── test_api_chat.py             # Phase 8: follow-ups, error handling
-    └── test_api_app.py              # Phase 8: the real HTTP routes (skipped if fastapi is not installed)
+    ├── test_api_app.py              # Phase 8: the real HTTP routes (skipped if fastapi is not installed)
+    ├── test_testcases.py            # Phase 9: boundary values, wording cues, six-point sets, dates, conflicts
+    ├── test_export_xlsx.py          # Phase 9: workbook sheets, cell types, formula safety, csv
+    ├── test_batches.py              # Phase 9: batch run, save-as-you-go, cancel, restart
+    ├── test_api_batches.py          # Phase 9: batch and export routes over HTTP
+    ├── test_golden_phrasing.py      # Phase 9: ~60 realistic sentences for number/date reading and grounding
+    ├── test_error_branches.py       # Phase 9: error paths (Ollama client, summary, graph)
+    ├── test_end_to_end.py           # Phase 9: PDF + Word -> index -> agent -> API -> Excel
+    ├── test_live_ollama.py          # Phase 9: needs real Ollama; run with: pytest -m live
+    ├── test_ui_page.py              # Phase 9: runs tests/ui/ (the web page in a simulated browser, needs node)
+    └── ui/                          # Phase 9: web page scenarios (node, no packages)
 ```
 
 `OllamaClient` is deliberately the *only* thing later phases (retrieval,
@@ -525,7 +541,82 @@ order. On a laptop where two runs at once would freeze the machine, that is deli
 - There is no login; the server listens on `127.0.0.1` by default.
 - Re-uploading overwrites the saved copy of the file even if the new one is broken. The index stays safe.
 
-## What's *not* in this drop
+## Phase 9: batches, Excel test values, tests and CI
 
-The run report file (Markdown + JSON) and final CI/coverage work (Phase 9), plus the stretch goal of generating
-test values. `requirements.txt` reflects what Phases 1–8 need.
+### Run many fields and get one Excel file
+On the web page open the **Batch** tab, paste your fields (one per line, or comma-separated) and press **Run batch**.
+The whole batch is one job on the single worker, so it never runs at the same time as a question. Fields run one after
+another through the same agent as `/chat`; one failing field is recorded as an error and the batch carries on. **Every
+finished field is saved to disk at once** (`BATCH_DIR`, default `./data/batches/<batch_id>/`), so a crash or restart loses
+nothing; a batch that was running when the server stopped comes back as *interrupted* and can still be exported.
+
+| Call | What it does |
+|---|---|
+| `POST /batches` | `{"fields": [...], "source_file": null, "kinds": "both", "fast": false}` -> 202 `{batch_id, job_id, count}`. 1 to `MAX_BATCH_FIELDS` (default 50) fields, each at most 500 characters |
+| `GET /batches`, `GET /batches/{id}` | Recent batches / progress: status (`queued`, `running`, `done`, `cancelled`, `interrupted`), done, current field, per-field result |
+| `GET /batches/{id}/results` | The full answer of every finished field (the page uses it to open each field) |
+| `POST /batches/{id}/cancel` | Stop **between** fields: the current one finishes, the rest are skipped |
+| `DELETE /batches/{id}` | Remove a finished batch and its saved results |
+| `GET /batches/{id}/export?format=xlsx\|csv&include_examples=false&step=` | One file with **all** fields |
+| `GET /sessions/{id}/export`, `GET /sessions/{id}/turns/{n}/export` | The same, for a whole conversation or one answer |
+
+Fields are split on new lines, commas and semicolons; bullets and numbering are stripped; repeats are removed ignoring case.
+Time: about 4 to 5 minutes per field on a laptop CPU, so 20 fields take roughly 1.5 hours. A batch makes this "start it and
+walk away"; it does not make each field faster.
+
+### The workbook
+Five sheets, `.xlsx` only (no macros): **Summary** (one row per field, counts per outcome, models and documents used),
+**Test values**, **Findings** (everything, including failed and example findings), **Search log** (phrasings, paragraphs read,
+attempts, timings) and **Read me**. Numbers and dates are real number and date cells. The csv export is the *Test values* sheet
+as UTF-8 with a byte-order mark. File name: `lending-policy-test-values_YYYY-MM-DD_HHMM.xlsx`. Every column is explained in
+`docs/USER_GUIDE.md` and inside the file.
+
+### How test values are made (`testcases.py`)
+- Only findings that **passed the grounding checks** are used. By default only `firm_rule`; with `include_examples=true`,
+  example/guidance rows are added and labelled **Not a firm rule**.
+- Exact arithmetic (`Decimal`, built from the stated text). The step is one unit of the last decimal place stated (6.5 gives 0.1,
+  90 gives 1), or `step=`. Units are copied, never converted.
+- Minimum V: V-step Reject; V by wording; V+step Accept. Maximum V: V-step Accept; V by wording; V+step Reject. A field with both a
+  minimum and a maximum (same unit and scope) gets **one** six-point set.
+- **Whether the limit value itself is allowed** comes from the wording around that value: "up to", "not exceed", "at least",
+  "not less than" allow it; "less than", "below", "greater than", "above" do not. The part of the sentence that only says *who*
+  the limit applies to is ignored, and a sentence with two limits is read one limit at a time. If the wording is missing or
+  contradictory the expected result is **Confirm with policy owner**. **Nothing is ever guessed.**
+- Dates use calendar arithmetic (month ends, leap days). A rule dated only to a month uses the 1st and every expected result says
+  **Confirm (document gives only the month)**.
+- Conflicting grounded values for one limit each get cases, flagged `CONFLICT` with the other value and source in Notes.
+- Text that starts with `=`, `+`, `-`, `@`, a tab or a carriage return is stored as plain text, in xlsx and csv, so a quote from a
+  document can never run as a formula.
+
+## Operations
+
+```bash
+pytest                               # everything except the live tests
+pytest --cov=src/lending_agent       # with coverage (needs pytest-cov)
+pytest -m live -v                    # LIVE: real Ollama + real embedding model + the sample handbook; slow; skips with a reason if Ollama is missing
+node tests/ui/run_all.js             # the web page scenarios on their own (needs node, no packages)
+bash scripts/ci.sh                   # exactly what CI runs: install, no-documents check, ruff, tests + coverage, web page tests, pip-audit
+```
+- **CI.** `scripts/ci.sh` does everything, so any CI system can call it; `.github/workflows/ci.yml` runs it on Python 3.10 and 3.12.
+  `requirements-ci.txt` leaves out `sentence-transformers`/torch because the tests use a fake embedder. Coverage floor: `COV_MIN`
+  (default 85). The dependency audit (`pip-audit`) never blocks the build.
+- **Bank policy documents must never be committed.** `.gitignore` excludes `*.pdf`, `*.docx`, `.env`, `chroma_db/`, `uploads/`,
+  `results/`, `data/` and `chunks.json`; tests build their files on the fly. `scripts/check_no_documents.sh` fails CI if a document is
+  tracked. Turn on the local guard once per clone: `git config core.hooksPath .githooks`. If a document was committed earlier, run
+  `git rm --cached <file>` (the sample handbook `pub-ch-retail-lending.pdf` is only used by the live test and stays on your disk).
+- **Known weakness, recorded as strict expected failures** in `tests/test_golden_phrasing.py`: the number reader also returns the
+  *parts* of a number written in words ("seventy two" gives 2, 70 and 72), so a model that claims the value 2 for "seventy two months"
+  passes the hard grounding checks. The test will start failing the day this is fixed, and then the `xfail` marker should be removed.
+
+## Roadmap / Not built yet
+
+Not built, by decision: Streamlit (the HTML page replaces it); login or single sign-on; OCR for scanned PDFs; hybrid search, the
+reranker and section-aware chunking; speed optimisations; freeze protection (memory guard, `--threads`, `--gentle`); a glossary file
+and document-aware synonym expansion.
+
+**Known limitations:** conversations are in memory (a restart clears them); batches run one field at a time (about 4-5 minutes each on a
+laptop CPU); expected results are only as reliable as the extracted rule, and unclear cases are marked "Confirm"; documents indexed from the
+command line appear only after a server restart; there is no login (the server listens on `127.0.0.1`); re-uploading overwrites the saved copy
+of a file even if the new one is broken (the index stays safe).
+
+Guides: `docs/USER_GUIDE.md` (for testers) and `docs/DEPLOYMENT.md` (install, offline set-up, shared Ollama, security, troubleshooting).

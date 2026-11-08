@@ -80,6 +80,7 @@ class AgentAnswer:
     attempts: int
     widened: bool
     trace: list[dict] = field(default_factory=list)
+    search: dict = field(default_factory=dict)       # what was searched and read: terms, paragraphs, how many were sent
 
     def to_dict(self) -> dict:
         return {
@@ -90,6 +91,7 @@ class AgentAnswer:
             "widened_search": self.widened,
             "result": self.result.to_dict(),
             "trace": self.trace,
+            "search": self.search,
         }
 
 
@@ -101,6 +103,18 @@ class _WithFeedback:
 
     def generate(self, prompt: str, **kwargs: Any) -> str:
         return self.llm.generate(prompt + "\n\n" + self.feedback, **kwargs)
+
+
+def _search_info(state: "AgentState") -> dict:
+    """What the agent searched for and read, kept so the Excel "Search log" sheet can show it."""
+    expansion = state["expansion"]
+    return {
+        "terms": list(expansion.terms), "terms_source": expansion.source, "note": expansion.llm_error,
+        "paragraphs": [{"chunk_id": e.chunk_id, "source_file": e.source_file, "page_number": e.page_number,
+                        "section": getattr(e, "section", None), "similarity": round(e.similarity, 3),
+                        "matched_terms": list(e.matched_terms), "text": e.text} for e in state.get("evidence", [])],
+        "paragraphs_sent": getattr(state.get("extraction"), "paragraphs_sent", None),
+    }
 
 
 def _feedback_from(verified: VerifiedResult) -> str:
@@ -211,6 +225,7 @@ def build_graph(searcher: Any, llm: Any = None, config: AgentConfig | None = Non
         answer = AgentAnswer(
             field=verified.field, route=_route(verified), summary=_summary(verified), result=verified,
             attempts=state["attempt"], widened=state["widened"], trace=list(state.get("trace", [])),
+            search=_search_info(state),
         )
         return {"answer": answer}
 

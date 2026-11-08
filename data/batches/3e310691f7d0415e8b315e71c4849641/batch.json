@@ -1,0 +1,17 @@
+{
+  "batch_id": "3e310691f7d0415e8b315e71c4849641",
+  "status": "done",
+  "fields": [
+    "current balance",
+    "loan date"
+  ],
+  "total": 2,
+  "created_at": "2026-11-08T20:51:46+05:30",
+  "started_at": "2026-11-08T20:51:46+05:30",
+  "finished_at": "2026-11-08T20:55:49+05:30",
+  "options": {
+    "source_file": null,
+    "kinds": "both",
+    "fast": false
+  }
+}

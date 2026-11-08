@@ -54,7 +54,7 @@ def main() -> int:
         print(f"  {path}: {n} chunk(s)")
 
     print(f"\n✓ Collection '{store.settings.collection_name}' now has {store.count()} chunk(s) total.")
-    print(f"  Try: python scripts/search_index.py \"your question about the policy\"")
+    print("  Try: python scripts/search_index.py \"your question about the policy\"")
     return 0
 
 

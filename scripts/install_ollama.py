@@ -18,7 +18,6 @@ from __future__ import annotations
 import platform
 import shutil
 import subprocess
-import sys
 
 
 def _confirm(prompt: str) -> bool:

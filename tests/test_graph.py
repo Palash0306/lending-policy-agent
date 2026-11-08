@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from lending_agent.agent.graph import (
     ROUTE_ERROR, ROUTE_NEEDS_REVIEW, ROUTE_NOT_FOUND, ROUTE_VERIFIED, AgentConfig, ask, build_graph,
 )

@@ -87,6 +87,7 @@ def build_payload(answer: Any) -> dict:
         "source_quote": None, "source_file": None, "page_number": None,
         "findings": [], "conflicts": [], "rejected": list(result.rejected), "error": result.error,
         "attempts": answer.attempts, "widened_search": answer.widened, "trace": list(answer.trace),
+        "search": dict(getattr(answer, "search", None) or {}),
     }
 
     if answer.route == ROUTE_ERROR:

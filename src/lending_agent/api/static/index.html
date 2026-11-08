@@ -65,7 +65,22 @@
   form { display: flex; gap: 8px; flex-wrap: wrap; } #message { flex: 1 1 260px; }
   .opts { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; font-size: 13px; color: var(--muted); }
   .hint { font-size: 13px; color: var(--muted); }
-  #title-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  #title-row, #chat-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  #chat-head h2 { margin: 0; }
+  #tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line); }
+  .tab { background: transparent; color: var(--muted); border: 1px solid transparent; border-bottom: none; border-radius: 7px 7px 0 0; padding: 6px 14px; }
+  .tab[aria-selected="true"] { color: var(--text); background: var(--panel); border-color: var(--line); font-weight: 600; margin-bottom: -1px; }
+  textarea { font: inherit; width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg); color: var(--text); resize: vertical; }
+  label.block { display: block; margin-bottom: 4px; font-size: 13px; color: var(--muted); }
+  #batch-panel > * + * { margin-top: 10px; }
+  .bar { height: 12px; border-radius: 99px; background: var(--none-bg); overflow: hidden; margin: 8px 0; }
+  .fill { height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+  ul.fields { list-style: none; margin: 10px 0; padding: 0; }
+  ul.fields li { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; border-top: 1px solid var(--line); font-size: 14px; }
+  ul.fields .fname { flex: 1; overflow-wrap: anywhere; } .state { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .counts { display: flex; gap: 10px; flex-wrap: wrap; margin: 8px 0; font-size: 13px; }
+  .dl { font-size: 15px; padding: 9px 18px; }
+  #batch-area details { margin-top: 10px; } #batch-area details > summary { font-size: 14px; }
 </style>
 </head>
 <body>
@@ -90,12 +105,32 @@
     </section>
   </aside>
   <section id="chat">
-    <h2 id="chat-title">Ask</h2>
-    <div id="log" aria-live="polite"></div>
-    <form id="form">
-      <input type="text" id="message" placeholder="loan_tenure" maxlength="500" autocomplete="off" aria-label="Your question">
-      <button id="send" type="submit">Ask</button>
-    </form>
+    <div id="chat-head"><h2 id="chat-title">Ask</h2><button id="export-conv" type="button" class="secondary small" hidden>Export all answers (.xlsx)</button></div>
+    <div id="tabs" role="tablist" aria-label="Mode">
+      <button id="tab-ask" type="button" role="tab" class="tab" aria-selected="true" aria-controls="ask-panel">Ask a question</button>
+      <button id="tab-batch" type="button" role="tab" class="tab" aria-selected="false" aria-controls="batch-panel">Batch (many fields)</button>
+    </div>
+    <div id="notice" class="hint" role="status" aria-live="polite"></div>
+    <div id="ask-panel" role="tabpanel" aria-labelledby="tab-ask">
+      <div id="log" aria-live="polite"></div>
+      <form id="form">
+        <input type="text" id="message" placeholder="loan_tenure" maxlength="500" autocomplete="off" aria-label="Your question">
+        <button id="send" type="submit">Ask</button>
+      </form>
+    </div>
+    <div id="batch-panel" role="tabpanel" aria-labelledby="tab-batch" hidden>
+      <div>
+        <label class="block" for="batch-fields">Fields or questions: one per line, or separated by commas</label>
+        <textarea id="batch-fields" rows="6" placeholder="loan_tenure&#10;loan_amount&#10;applicant_age"></textarea>
+      </div>
+      <div id="batch-count" class="hint" aria-live="polite">0 fields</div>
+      <div>
+        <label class="block" for="batch-file">Or load a .txt or .csv of field names (read in your browser; nothing is uploaded)</label>
+        <input type="file" id="batch-file" accept=".txt,.csv,text/plain,text/csv">
+      </div>
+      <div><button id="batch-run" type="button" disabled>Run batch</button></div>
+      <div id="batch-area"></div>
+    </div>
     <div class="opts">
       <label>Search in <select id="source"><option value="">all documents</option></select></label>
       <label>Look for <select id="kinds"><option value="both">limits and dates</option><option value="boundary">numeric limits only</option><option value="date">date cutoffs only</option></select></label>
@@ -107,12 +142,14 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const LABELS = { verified: "VERIFIED", needs_review: "NEEDS REVIEW", not_found: "NOT FOUND", error: "ERROR" };
-const KEY = { convs: "lpa.conversations", current: "lpa.current", pending: "lpa.pending" };
+const KEY = { convs: "lpa.conversations", current: "lpa.current", pending: "lpa.pending", batch: "lpa.batch" };
 const HINT = "Ask for a field, such as loan_tenure, or a question, such as “What is the maximum loan amount?”. Then ask follow-ups like “what about for commercial loans?”. Answers can take a few minutes on a laptop.";
 const MAX_CONVS = 50;
 let convs = readJSON(KEY.convs, []);       // [{id, title, updated}]: the LIST lives in this browser; answers live on the server
 let currentId = readText(KEY.current);     // session id of the open conversation, or null for a new one
-let busy = false;                          // a question is running
+let busy = false;                          // a question or a batch is running
+let batchId = readText(KEY.batch);         // the batch being followed, if any (survives a reload)
+let maxBatchFields = 50;                   // the server's limit, learned from /health
 
 /* ---------- small helpers ---------- */
 function readJSON(key, fallback) { try { const v = JSON.parse(localStorage.getItem(key)); return v == null ? fallback : v; } catch (e) { return fallback; } }
@@ -166,6 +203,7 @@ async function refreshStatus() {
   const box = $("status");
   try {
     const h = await api("/health"), o = h.ollama;
+    if (h.max_batch_fields) { maxBatchFields = h.max_batch_fields; updateBatchCount(); }
     box.replaceChildren("Ollama: ", el("b", { className: o.reachable && o.model_available ? "good" : "bad",
       textContent: !o.reachable ? "not reachable" : (o.model_available ? "ready (" + o.model + ")" : "model " + o.model + " not installed") }));
     box.append("  ·  " + h.documents + " document(s), " + h.chunks + " chunks");
@@ -240,7 +278,7 @@ function renderConvs() {
   }
   $("convs-empty").hidden = convs.length > 0;
 }
-function setBusy(value) { busy = value; $("send").disabled = value; $("new").disabled = value; renderConvs(); }
+function setBusy(value) { busy = value; $("send").disabled = value; $("new").disabled = value; renderConvs(); updateBatchCount(); }
 async function openConv(id) { if (busy) return; currentId = id; writeText(KEY.current, id); renderConvs(); await showConversation(); }
 async function newConv() { if (busy) return; currentId = null; writeText(KEY.current, null); renderConvs(); await showConversation(); $("message").focus(); }
 async function deleteConv(id) {
@@ -294,7 +332,11 @@ function renderAnswer(p, message) {
   foot.push("took " + fmt(p.elapsed_seconds || 0));
   card.append(el("div", { className: "foot", textContent: foot.join("  ·  ") }));
   if (p.route === "verified" || p.route === "needs_review") card.append(el("div", { className: "foot", textContent: "Spot-check the quoted page before using any value in a test plan." }));
-  if (p.route !== "error" || p.field) card.append(el("div", { className: "actions" }, el("button", { className: "secondary small", textContent: "Report (.md)", onclick: () => downloadReport(p, message) })));
+  const actions = el("div", { className: "actions" });
+  if (p.route !== "error" || p.field) actions.append(el("button", { className: "secondary small", textContent: "Report (.md)", onclick: () => downloadReport(p, message) }));
+  if (p.session_id && p.turn && p.findings && p.findings.length) actions.append(el("button", { className: "secondary small", textContent: "Test values (.xlsx)",
+    onclick: () => downloadFile("/sessions/" + encodeURIComponent(p.session_id) + "/turns/" + p.turn + "/export?format=xlsx") }));
+  if (actions.children.length) card.append(actions);
   return card;
 }
 
@@ -335,13 +377,31 @@ function buildReport(p, message, now) {
   L.push("", "---", "Generated by the Lending Policy Data Assurance Agent. Spot-check the quoted page before using any value in a test plan.", "");
   return L.join("\n");
 }
-function downloadReport(p, message) {
-  const day = new Date().toISOString().slice(0, 10), name = String(p.field || "answer").replace(/[^A-Za-z0-9_-]+/g, "_").slice(0, 60);
-  const url = URL.createObjectURL(new Blob([buildReport(p, message)], { type: "text/markdown;charset=utf-8" }));
+function saveBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
-  link.href = url; link.download = "report_" + name + "_" + day + ".md";
+  link.href = url; link.download = filename;
   document.body.append(link); link.click(); link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function downloadReport(p, message) {
+  const day = new Date().toISOString().slice(0, 10), name = String(p.field || "answer").replace(/[^A-Za-z0-9_-]+/g, "_").slice(0, 60);
+  saveBlob(new Blob([buildReport(p, message)], { type: "text/markdown;charset=utf-8" }), "report_" + name + "_" + day + ".md");
+}
+async function downloadFile(url) {                       // fetch first, so a refusal ("nothing to export") shows as a message, not an error page
+  const note = $("notice");
+  note.textContent = "Preparing the file…";
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      let msg = res.status + " " + res.statusText;
+      try { const body = await res.json(); if (body && typeof body.detail === "string") msg = body.detail; } catch (e) { /* not JSON */ }
+      throw new Error(msg);
+    }
+    const blob = await res.blob(), match = /filename="?([^";]+)"?/.exec(res.headers.get("Content-Disposition") || ""), name = match ? match[1] : "export.xlsx";
+    saveBlob(blob, name);
+    note.textContent = "Downloaded " + name + ".";
+  } catch (e) { note.textContent = "✗ Could not download: " + e.message; }
 }
 
 /* ---------- showing a conversation, asking, and picking a running question back up ---------- */
@@ -354,10 +414,12 @@ async function showConversation() {
   const title = convs.find((c) => c.id === currentId);
   $("chat-title").textContent = title ? title.title : "Ask";
   log().replaceChildren();
+  $("export-conv").hidden = true;
   if (!currentId) { addToLog(el("p", { className: "hint", textContent: HINT })); return; }
   try {
     const s = await api("/sessions/" + encodeURIComponent(currentId));
     if (!s.turns.length) addToLog(el("p", { className: "hint", textContent: HINT }));
+    $("export-conv").hidden = !s.turns.length;
     for (const t of s.turns) { addToLog(youBubble(t.message)); addToLog(renderAnswer(t.payload, t.message)); }
   } catch (e) {
     addToLog(el("p", { className: "hint", textContent: e.status === 404
@@ -368,7 +430,7 @@ async function showConversation() {
 function finishQuestion(job, waiting, message) {          // turn a finished job into an answer card
   writeText(KEY.pending, null);
   if (job.status === "failed") waiting.replaceWith(errorCard("I could not answer this: " + (job.error || "the job failed.")));
-  else { waiting.replaceWith(renderAnswer(job.result, message)); if (job.result.session_id) { currentId = job.result.session_id; writeText(KEY.current, currentId); touchConv(currentId, message); } }
+  else { waiting.replaceWith(renderAnswer(job.result, message)); if (job.result.session_id) { currentId = job.result.session_id; writeText(KEY.current, currentId); touchConv(currentId, message); $("export-conv").hidden = false; } }
 }
 async function followJob(jobId, waiting, message) {
   try { finishQuestion(await pollJob(jobId, (j) => { waiting.textContent = waitingText(j); }), waiting, message); }
@@ -410,10 +472,154 @@ async function resumePending() {                           // a question was run
   await followJob(p.job_id, waiting, p.message);
 }
 
+/* ---------- batch: many fields, one Excel file ---------- */
+const BULLET = /^\s*(?:[-*•·–]+|\(?\d{1,3}[.)])\s+/;
+function parseFields(text) {       // the same rules as the server: split, strip bullets and numbering, drop blanks and repeats
+  const seen = new Set(), fields = [];
+  let repeats = 0, tooLong = 0;
+  for (const part of String(text || "").split(/[\n\r;,]+/)) {
+    const field = part.replace(BULLET, "").trim();
+    if (!field) continue;
+    const key = field.toLowerCase();
+    if (seen.has(key)) { repeats++; continue; }
+    seen.add(key);
+    if (field.length > 500) tooLong++;
+    fields.push(field);
+  }
+  return { fields, repeats, tooLong };
+}
+function updateBatchCount() {
+  const r = parseFields($("batch-fields").value), n = r.fields.length, notes = [n + (n === 1 ? " field" : " fields")];
+  if (r.repeats) notes.push(r.repeats + " repeated removed");
+  if (r.tooLong) notes.push(r.tooLong + " longer than 500 characters: shorten them");
+  if (n > maxBatchFields) notes.push("over the limit of " + maxBatchFields + ": remove " + (n - maxBatchFields));
+  $("batch-count").textContent = notes.join("  ·  ");
+  $("batch-run").disabled = busy || !n || n > maxBatchFields || r.tooLong > 0;
+  return r;
+}
+function switchTab(name) {
+  const batch = name === "batch";
+  $("tab-ask").setAttribute("aria-selected", String(!batch)); $("tab-batch").setAttribute("aria-selected", String(batch));
+  $("ask-panel").hidden = batch; $("batch-panel").hidden = !batch;
+  if (batch) updateBatchCount();
+}
+$("tab-ask").onclick = () => switchTab("ask");
+$("tab-batch").onclick = () => switchTab("batch");
+$("batch-fields").oninput = updateBatchCount;
+$("batch-file").onchange = async () => {
+  const file = $("batch-file").files[0];
+  if (!file) return;
+  try {
+    const text = await file.text(), box = $("batch-fields");
+    box.value = (box.value.trim() ? box.value.trim() + "\n" : "") + text;
+    updateBatchCount(); $("notice").textContent = "Loaded " + file.name + ".";
+  } catch (e) { $("notice").textContent = "✗ Could not read that file: " + e.message; }
+  $("batch-file").value = "";
+};
+$("export-conv").onclick = () => (currentId ? downloadFile("/sessions/" + encodeURIComponent(currentId) + "/export?format=xlsx") : undefined);
+
+const BATCH_STATE = { verified: "Verified", needs_review: "Needs review", not_found: "Not found", error: "Error" };
+function batchStatusLine(b) {
+  const left = b.total - b.done, perField = b.done ? (b.elapsed_seconds || 0) / b.done : 0;
+  if (b.status === "queued") return "Waiting for the agent to finish another job…";
+  if (b.status === "running") return b.done + " of " + b.total + " done  ·  now: " + (b.current || "…") + "  ·  elapsed " + fmt(b.elapsed_seconds || 0) +
+    (b.done ? "  ·  about " + fmt(perField * left) + " left" : "");
+  if (b.status === "done") return "Finished: " + b.done + " of " + b.total + " fields, in " + fmt(b.elapsed_seconds || 0) + ".";
+  if (b.status === "cancelled") return "Stopped: " + b.done + " of " + b.total + " fields finished; the rest were skipped.";
+  return "Interrupted (the server stopped): " + b.done + " of " + b.total + " fields finished. They can still be downloaded.";
+}
+function renderBatch(b) {
+  const area = $("batch-area"), active = b.status === "queued" || b.status === "running", card = el("div", { className: "card" });
+  card.append(el("h2", { textContent: "Batch of " + b.total + (b.total === 1 ? " field" : " fields") }));
+  const bar = el("div", { className: "bar" }), fill = el("div", { className: "fill" });
+  fill.style.width = (b.total ? Math.round(100 * b.done / b.total) : 0) + "%";
+  bar.setAttribute("role", "progressbar"); bar.setAttribute("aria-label", "Batch progress");
+  bar.setAttribute("aria-valuemin", "0"); bar.setAttribute("aria-valuemax", String(b.total)); bar.setAttribute("aria-valuenow", String(b.done));
+  bar.append(fill); card.append(bar);
+  const status = el("div", { className: "answer", textContent: batchStatusLine(b) }); status.setAttribute("aria-live", "polite"); card.append(status);
+  if (!active) {
+    const counts = {}; for (const i of b.items) counts[i.route] = (counts[i.route] || 0) + 1;
+    card.append(el("div", { className: "counts" }, ...Object.keys(BATCH_STATE).map((k) => el("span", { className: "badge " + k, textContent: BATCH_STATE[k] + ": " + (counts[k] || 0) }))));
+  }
+  const list = el("ul", { className: "fields" });
+  b.fields.forEach((name, i) => {
+    const item = b.items[i], waitingState = active ? (i === b.items.length && b.status === "running" ? "working…" : "waiting") : "skipped";
+    list.append(el("li", {}, el("span", { className: "fname", textContent: name }),
+      item ? el("span", { className: "badge " + item.route, textContent: BATCH_STATE[item.route] || item.route }) : el("span", { className: "state", textContent: waitingState }),
+      item && item.headline ? el("span", { className: "state", textContent: item.headline }) : null,
+      item && item.seconds != null ? el("span", { className: "state", textContent: fmt(item.seconds) }) : null));
+  });
+  card.append(list);
+  const actions = el("div", { className: "actions" });
+  if (active) {
+    const stop = el("button", { className: "secondary", textContent: "Stop after current field", onclick: () => stopBatch(b.batch_id, stop) });
+    actions.append(stop);
+  } else {
+    const id = encodeURIComponent(b.batch_id), none = b.done === 0;
+    actions.append(el("button", { className: "dl", textContent: "Download Excel (all fields)", disabled: none, onclick: () => downloadFile("/batches/" + id + "/export?format=xlsx") }),
+      el("button", { className: "secondary dl", textContent: "Download CSV", disabled: none, onclick: () => downloadFile("/batches/" + id + "/export?format=csv") }),
+      el("button", { className: "secondary", textContent: "Close", onclick: () => closeBatch(false) }),
+      el("button", { className: "secondary", textContent: "Delete batch", onclick: () => closeBatch(true) }));
+  }
+  card.append(actions);
+  area.replaceChildren(card);
+  return card;
+}
+async function stopBatch(id, button) {
+  button.disabled = true; button.textContent = "Stopping after the current field…";
+  try { await api("/batches/" + encodeURIComponent(id) + "/cancel", { method: "POST" }); }
+  catch (e) { $("notice").textContent = "✗ " + e.message; }
+}
+async function closeBatch(remove) {
+  const id = batchId;
+  if (remove && id) { if (!confirm("Delete this batch and its saved results from the server?")) return; try { await api("/batches/" + encodeURIComponent(id), { method: "DELETE" }); } catch (e) { $("notice").textContent = "✗ " + e.message; return; } }
+  batchId = null; writeText(KEY.batch, null); $("batch-area").replaceChildren();
+}
+async function showBatchResults(b, card) {                 // each finished field can be opened with the normal answer card
+  if (!b.done) return;
+  try {
+    const { results } = await api("/batches/" + encodeURIComponent(b.batch_id) + "/results");
+    for (const p of results) {
+      const name = p.batch_field || p.field || p.query_used || "field";
+      card.append(el("details", {}, el("summary", { textContent: name + "  ·  " + (BATCH_STATE[p.route] || p.route) }), renderAnswer(p, name)));
+    }
+  } catch (e) { $("notice").textContent = "Could not load the field details: " + e.message; }
+}
+async function followBatch(id) {
+  setBusy(true);
+  let misses = 0;
+  try {
+    for (;;) {
+      let b;
+      try { b = await api("/batches/" + encodeURIComponent(id)); misses = 0; }
+      catch (e) {
+        if (e.status === 404) { batchId = null; writeText(KEY.batch, null); $("batch-area").replaceChildren(el("p", { className: "hint", textContent: "The server no longer has this batch." })); return; }
+        if (++misses > 5) { $("notice").textContent = "Lost contact with the server. Reload the page to pick the batch up again."; return; }
+        await sleep(3000); continue;
+      }
+      const card = renderBatch(b);
+      if (b.status !== "queued" && b.status !== "running") { await showBatchResults(b, card); return; }
+      await sleep(2000);
+    }
+  } finally { setBusy(false); refreshStatus(); }
+}
+$("batch-run").onclick = async () => {
+  const r = updateBatchCount();
+  if (busy || !r.fields.length) return;
+  $("notice").textContent = "";
+  try {
+    const accepted = await api("/batches", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fields: r.fields, source_file: $("source").value || null, kinds: $("kinds").value, fast: $("fast").checked }) });
+    batchId = accepted.batch_id; writeText(KEY.batch, batchId);
+    await followBatch(batchId);
+  } catch (e) { $("notice").textContent = "✗ " + e.message; }
+};
+
 async function init() {
   renderConvs(); refreshStatus(); setInterval(refreshStatus, 30000);
   await loadDocs();
   if (readJSON(KEY.pending, null)) await resumePending(); else await showConversation();
+  if (batchId && !busy) { switchTab("batch"); await followBatch(batchId); }       // a batch was running when the page was closed
 }
 init();
 </script>
