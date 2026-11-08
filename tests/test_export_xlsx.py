@@ -4,7 +4,7 @@ from __future__ import annotations
 import csv
 import io
 import zipfile
-from datetime import date, datetime
+from datetime import datetime
 
 import openpyxl
 import pytest
