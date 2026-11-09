@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 .lpa/
 lpa/
+data/
 uploads/
 data/
 venv/
